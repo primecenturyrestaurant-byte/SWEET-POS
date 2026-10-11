@@ -1,0 +1,6 @@
+{
+  "name": "PRIME CENTURY SWEET - Point of Sale",
+  "description": "Complete Sweet Shop POS system for Prime Century Sweet with billing, weight calculations, GST compliance, inventory, thermal receipt printing, and sales reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

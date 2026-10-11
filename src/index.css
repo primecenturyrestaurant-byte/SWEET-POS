@@ -1,0 +1,217 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, .font-display {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+
+  .font-mono-numbers {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom scrollbars for POS product catalogs */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1ede7;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4c5b3;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b89f82;
+}
+
+/* =========================================================================
+   PRINT STYLES FOR POS THERMAL RECEIPT (80mm & 58mm) & A4 INVOICES
+   ========================================================================= */
+
+@media screen {
+  .print-only {
+    display: none !important;
+  }
+}
+
+/* Default continuous thermal paper sizing */
+@page {
+  size: 80mm auto;
+  margin: 0mm !important;
+}
+
+@page thermal80 {
+  size: 80mm auto;
+  margin: 0mm !important;
+}
+
+@page thermal58 {
+  size: 58mm auto;
+  margin: 0mm !important;
+}
+
+@page invoiceA4 {
+  size: A4 portrait;
+  margin: 10mm !important;
+}
+
+@media print {
+  /* 1. Global Box-Sizing & Color Invariance for Printing */
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 2. Page & Body Formatting */
+  html,
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* 80mm Thermal Receipt (Default) */
+  body.print-receipt-80mm,
+  body.is-printing-receipt:not(.print-receipt-58mm):not(.print-invoice-a4) {
+    width: 80mm !important;
+    max-width: 80mm !important;
+  }
+
+  /* 58mm Compact Thermal Receipt */
+  body.print-receipt-58mm {
+    width: 58mm !important;
+    max-width: 58mm !important;
+  }
+
+  /* Standard A4 Sheet Invoice */
+  body.print-invoice-a4 {
+    width: 210mm !important;
+    max-width: 210mm !important;
+  }
+
+  /* 3. Hide Unwanted UI Elements */
+  .no-print,
+  .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Hide Main App Workspace When Printing Receipts */
+  body.is-printing-receipt .app-workspace,
+  body.is-printing-receipt header,
+  body.is-printing-receipt aside,
+  body.is-printing-receipt main,
+  body.is-printing-receipt nav,
+  body.is-printing-receipt .no-print-in-receipt {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Remove outer flex and screen-height restrictions */
+  #root,
+  .app-root-layout {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
+  /* 4. The Print-Only Receipt Container */
+  .print-only {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important; /* Normal document flow prevents extra blank pages */
+    width: 100% !important;
+    max-width: 80mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* 5. Thermal Receipt Wrapper: Printable Content Width (72-76mm on 80mm paper) */
+  .receipt-thermal-wrapper {
+    page: thermal80;
+    width: 74mm !important; /* Printable area for 80mm roll, keeping ~3mm hardware edge */
+    max-width: 74mm !important;
+    margin: 0 auto !important;
+    padding: 1.5mm 1mm 3mm 1mm !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+  }
+
+  body.print-receipt-58mm .receipt-thermal-wrapper {
+    page: thermal58;
+    width: 52mm !important;
+    max-width: 52mm !important;
+    padding: 1mm 0.5mm 2mm 0.5mm !important;
+    font-size: 10px !important;
+  }
+
+  body.print-invoice-a4 .receipt-thermal-wrapper {
+    page: invoiceA4;
+    width: 190mm !important;
+    max-width: 190mm !important;
+    padding: 8mm 6mm !important;
+    font-size: 12px !important;
+  }
+
+  /* 6. Prevent Page Breaks inside Rows and Summary Blocks */
+  .receipt-header,
+  .receipt-meta,
+  .receipt-table-header,
+  .receipt-items-container,
+  .receipt-item-row,
+  .receipt-totals,
+  .receipt-payment,
+  .receipt-signatory,
+  .receipt-footer,
+  .receipt-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* High contrast black text for thermal print heads */
+  .receipt-thermal-wrapper * {
+    color: #000000 !important;
+    text-shadow: none !important;
+    filter: none !important;
+  }
+}
