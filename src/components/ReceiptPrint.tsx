@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Bill, ShopSettings } from '../types';
-import { formatRupee, formatQuantityWithUnit } from '../lib/calculations';
-import { Printer, X, Download, FileText, CheckCircle2 } from 'lucide-react';
+import { formatRupee } from '../lib/calculations';
+import { Printer, X, Eye, FileText, CheckCircle2 } from 'lucide-react';
 
 interface ReceiptPrintProps {
   bill: Bill;
@@ -16,14 +17,22 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
   onClose,
   autoPrint = false,
 }) => {
-  const [selectedFormat, setSelectedFormat] = React.useState<'58mm' | '80mm' | 'a4'>(
+  const [selectedFormat, setSelectedFormat] = useState<'58mm' | '80mm' | 'a4'>(
     settings.printFormat || '80mm'
   );
+  const [isPrinting, setIsPrinting] = useState<boolean>(false);
+  const [isDomReady, setIsDomReady] = useState<boolean>(false);
 
+  const isPrintingRef = useRef<boolean>(false);
+  const autoPrintTriggeredRef = useRef<boolean>(false);
+  const printTimeoutRef = useRef<number | null>(null);
+
+  // Sync format changes with body styling
   useEffect(() => {
-    // Set format class on document body for print styling
     document.body.classList.add('is-printing-receipt');
+    document.body.setAttribute('data-print-format', selectedFormat);
     document.body.classList.remove('print-receipt-58mm', 'print-receipt-80mm', 'print-invoice-a4');
+
     if (selectedFormat === '58mm') {
       document.body.classList.add('print-receipt-58mm');
     } else if (selectedFormat === '80mm') {
@@ -39,20 +48,94 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
         'print-invoice-a4',
         'is-printing-receipt'
       );
+      document.body.removeAttribute('data-print-format');
     };
   }, [selectedFormat]);
 
+  // Clean up browser afterprint events to avoid stuck printing flags
   useEffect(() => {
-    if (autoPrint) {
-      const timer = setTimeout(() => {
-        window.print();
-      }, 350);
-      return () => clearTimeout(timer);
-    }
-  }, [autoPrint]);
+    const handleAfterPrint = () => {
+      isPrintingRef.current = false;
+      setIsPrinting(false);
+    };
 
-  const handlePrint = () => {
-    window.print();
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('afterprint', handleAfterPrint);
+      if (printTimeoutRef.current) {
+        window.clearTimeout(printTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Verify that the portal container #receipt-print has mounted with the current bill data
+  useEffect(() => {
+    const checkDomReady = () => {
+      const receiptEl = document.getElementById('receipt-print');
+      if (receiptEl && receiptEl.getAttribute('data-bill-id') === bill.id) {
+        setIsDomReady(true);
+      } else {
+        setIsDomReady(false);
+      }
+    };
+
+    // Check on next frame after React portaled the element
+    const rafId = requestAnimationFrame(checkDomReady);
+    return () => cancelAnimationFrame(rafId);
+  }, [bill.id, selectedFormat]);
+
+  // Execute print with strict validation of receipt container readiness
+  const executePrint = useCallback(() => {
+    if (isPrintingRef.current) {
+      console.warn('[ReceiptPrint] Print already in progress, ignoring duplicate call.');
+      return;
+    }
+
+    // Verify receipt DOM element exists and contains current bill
+    const receiptEl = document.getElementById('receipt-print');
+    if (!receiptEl || receiptEl.getAttribute('data-bill-id') !== bill.id) {
+      console.warn('[ReceiptPrint] #receipt-print container not fully rendered yet. Retrying...');
+      setTimeout(() => {
+        executePrint();
+      }, 50);
+      return;
+    }
+
+    isPrintingRef.current = true;
+    setIsPrinting(true);
+
+    // Double RAF ensures browser has completed style calculations & layout
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          window.print();
+        } catch (err) {
+          console.error('[ReceiptPrint] Print execution failed:', err);
+        } finally {
+          // Fallback reset in case afterprint doesn't fire in some browser configurations
+          printTimeoutRef.current = window.setTimeout(() => {
+            isPrintingRef.current = false;
+            setIsPrinting(false);
+          }, 1000);
+        }
+      });
+    });
+  }, [bill.id]);
+
+  // Handle autoPrint safely after DOM is confirmed ready
+  useEffect(() => {
+    if (autoPrint && isDomReady && !autoPrintTriggeredRef.current) {
+      autoPrintTriggeredRef.current = true;
+      const timer = window.setTimeout(() => {
+        executePrint();
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+  }, [autoPrint, isDomReady, executePrint]);
+
+  const handlePrintClick = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    executePrint();
   };
 
   const formattedDate = new Date(bill.createdAt).toLocaleDateString('en-IN', {
@@ -68,7 +151,9 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
 
   return (
     <>
-      {/* ON-SCREEN MODAL PREVIEW */}
+      {/* ========================================================================= */}
+      {/* 1. ON-SCREEN MODAL PREVIEW (Strictly excluded from printing via .no-print) */}
+      {/* ========================================================================= */}
       <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 no-print">
         <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full flex flex-col max-h-[92vh] overflow-hidden border border-[#e8d8c8]">
           {/* Top Control Bar */}
@@ -82,20 +167,31 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
                   Receipt Preview — {bill.billNumber}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  Thermal & A4 Print Engine
+                  Targeting 80mm Roll (72mm Printable Area)
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Format Switcher */}
+              {/* Paper Format Switcher */}
               <div className="flex items-center bg-white border border-[#e8d8c8] rounded-lg p-0.5 text-xs font-medium">
                 <button
                   type="button"
+                  onClick={() => setSelectedFormat('80mm')}
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                    selectedFormat === '80mm'
+                      ? 'bg-[#781324] text-white shadow-xs font-bold'
+                      : 'text-neutral-600 hover:text-neutral-900'
+                  }`}
+                >
+                  80mm (PeriPeri)
+                </button>
+                <button
+                  type="button"
                   onClick={() => setSelectedFormat('58mm')}
-                  className={`px-2.5 py-1 rounded transition-colors ${
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
                     selectedFormat === '58mm'
-                      ? 'bg-[#781324] text-white shadow-xs'
+                      ? 'bg-[#781324] text-white shadow-xs font-bold'
                       : 'text-neutral-600 hover:text-neutral-900'
                   }`}
                 >
@@ -103,21 +199,10 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSelectedFormat('80mm')}
-                  className={`px-2.5 py-1 rounded transition-colors ${
-                    selectedFormat === '80mm'
-                      ? 'bg-[#781324] text-white shadow-xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  80mm
-                </button>
-                <button
-                  type="button"
                   onClick={() => setSelectedFormat('a4')}
-                  className={`px-2.5 py-1 rounded transition-colors ${
+                  className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
                     selectedFormat === 'a4'
-                      ? 'bg-[#781324] text-white shadow-xs'
+                      ? 'bg-[#781324] text-white shadow-xs font-bold'
                       : 'text-neutral-600 hover:text-neutral-900'
                   }`}
                 >
@@ -125,13 +210,15 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
                 </button>
               </div>
 
+              {/* Main Print Bill Action Button */}
               <button
                 type="button"
-                onClick={handlePrint}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#781324] hover:bg-[#5c0e1b] text-white text-xs font-semibold rounded-lg shadow-sm transition-all cursor-pointer"
+                onClick={handlePrintClick}
+                disabled={isPrinting || !isDomReady}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#781324] hover:bg-[#5c0e1b] text-white text-xs font-semibold rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-50"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>Print Bill</span>
+                <span>{isPrinting ? 'Printing...' : 'Print Bill'}</span>
               </button>
 
               {onClose && (
@@ -147,7 +234,7 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
             </div>
           </div>
 
-          {/* Receipt Preview Canvas Area */}
+          {/* Receipt Preview Canvas Area (Screen-Only) */}
           <div className="p-4 sm:p-6 bg-neutral-100 overflow-y-auto flex justify-center">
             <div
               className={`bg-white shadow-md border border-neutral-200 transition-all ${
@@ -158,7 +245,6 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
                   : 'w-[540px] p-8 text-[13px]'
               }`}
             >
-              {/* Receipt Content Rendered for Preview */}
               <ReceiptTemplate
                 bill={bill}
                 settings={settings}
@@ -177,26 +263,39 @@ export const ReceiptPrint: React.FC<ReceiptPrintProps> = ({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={handlePrint}
-                className="font-medium text-[#781324] hover:underline"
+                onClick={handlePrintClick}
+                disabled={isPrinting || !isDomReady}
+                className="font-medium text-[#781324] hover:underline cursor-pointer disabled:opacity-50"
               >
-                Open System Print Dialog (Ctrl+P)
+                Click to Print Receipt or press Ctrl+P
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* PRINT-ONLY ELEMENT SENT TO THERMAL PRINTER */}
-      <div className="print-only">
-        <ReceiptTemplate
-          bill={bill}
-          settings={settings}
-          format={selectedFormat}
-          formattedDate={formattedDate}
-          formattedTime={formattedTime}
-        />
-      </div>
+      {/* ========================================================================= */}
+      {/* 2. DEDICATED RECEIPT CONTAINER FOR THERMAL PRINTER                        */}
+      {/*    Portaled directly to document.body with id="receipt-print"             */}
+      {/*    This guarantees immunity from any ancestor overflow, flex, or bounds!  */}
+      {/* ========================================================================= */}
+      {createPortal(
+        <div
+          id="receipt-print"
+          data-format={selectedFormat}
+          data-bill-id={bill.id}
+          data-items-count={bill.items.length}
+        >
+          <ReceiptTemplate
+            bill={bill}
+            settings={settings}
+            format={selectedFormat}
+            formattedDate={formattedDate}
+            formattedTime={formattedTime}
+          />
+        </div>,
+        document.body
+      )}
     </>
   );
 };
@@ -227,15 +326,15 @@ export const ReceiptTemplate: React.FC<ReceiptTemplateProps> = ({
     >
       {/* HEADER */}
       <div className="receipt-header text-center pb-1.5 border-b border-dashed border-neutral-400">
-        <div className="font-serif font-black text-base sm:text-lg tracking-wide uppercase text-neutral-900 leading-tight">
+        <div className="font-serif font-black text-base sm:text-lg tracking-wide uppercase text-neutral-900 leading-tight break-words">
           {settings.shopName}
         </div>
         {settings.tagline && (
-          <div className="text-[9px] text-neutral-600 italic leading-tight mt-0.5">
+          <div className="text-[9px] text-neutral-600 italic leading-tight mt-0.5 break-words">
             "{settings.tagline}"
           </div>
         )}
-        <div className="text-[9px] mt-0.5 text-neutral-700 max-w-[95%] mx-auto leading-tight">
+        <div className="text-[9px] mt-0.5 text-neutral-700 max-w-[95%] mx-auto leading-tight break-words">
           {settings.address}
         </div>
         <div className="text-[9px] text-neutral-700 leading-tight mt-0.5">
@@ -272,9 +371,9 @@ export const ReceiptTemplate: React.FC<ReceiptTemplateProps> = ({
           <span>{formattedTime}</span>
         </div>
         {bill.customerName && (
-          <div className="flex justify-between">
-            <span>Customer: <strong>{bill.customerName}</strong></span>
-            {bill.customerPhone && <span>{bill.customerPhone}</span>}
+          <div className="flex justify-between break-words">
+            <span className="truncate pr-1">Customer: <strong>{bill.customerName}</strong></span>
+            {bill.customerPhone && <span className="shrink-0">{bill.customerPhone}</span>}
           </div>
         )}
         <div className="flex justify-between text-neutral-600">
@@ -283,12 +382,11 @@ export const ReceiptTemplate: React.FC<ReceiptTemplateProps> = ({
         </div>
       </div>
 
-      {/* ITEMS TABLE */}
+      {/* ITEMS TABLE WITH ENHANCED WRAPPING FOR LONG NAMES */}
       <div className="receipt-items-container py-1 border-b border-dashed border-neutral-400">
-        <div className="flex text-[9px] font-bold border-b border-neutral-300 pb-0.5 mb-1 text-neutral-800">
-          <span className="flex-1">Item</span>
-          <span className="w-16 text-right">Qty/Rate</span>
-          <span className="w-14 text-right">Amt (₹)</span>
+        <div className="flex justify-between text-[9px] font-bold border-b border-neutral-300 pb-0.5 mb-1 text-neutral-800">
+          <span className="flex-1">Item / Particulars</span>
+          <span className="w-16 text-right">Amt (₹)</span>
         </div>
 
         <div className="space-y-1">
@@ -311,7 +409,7 @@ export const ReceiptTemplate: React.FC<ReceiptTemplateProps> = ({
                       </span>
                     )}
                   </div>
-                  <div className="w-14 text-right font-bold font-mono text-neutral-900 shrink-0 whitespace-nowrap pt-0.5">
+                  <div className="w-16 text-right font-bold font-mono text-neutral-900 shrink-0 whitespace-nowrap pt-0.5">
                     ₹{item.lineTotal.toFixed(2)}
                   </div>
                 </div>
