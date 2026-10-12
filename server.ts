@@ -1,10 +1,11 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
+import type { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { Bill, Product, ShopSettings, StockMovement, StaffUser, AuditLogEntry, ShiftSession, UserRole } from './src/types';
-import { DEFAULT_SETTINGS, INITIAL_PRODUCTS } from './src/lib/storage';
+import type { Bill, Product, ShopSettings, StockMovement, StaffUser, AuditLogEntry, ShiftSession, UserRole } from './src/types/index.ts';
+import { DEFAULT_SETTINGS, INITIAL_PRODUCTS } from './src/lib/constants.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
